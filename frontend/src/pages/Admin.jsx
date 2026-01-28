@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Routes, Route, NavLink, useNavigate } from 'react-router-dom'
-import { FileText, Gamepad2, Building2, Image, Plus, Edit2, Trash2, Save, X, Upload, Download, FileBox } from 'lucide-react'
+import { FileText, Gamepad2, Building2, Image, Plus, Edit2, Trash2, Save, X, Upload, Download, FileBox, MapPin, RefreshCw } from 'lucide-react'
+import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet'
+import 'leaflet/dist/leaflet.css'
 import {
   getBrands,
   getContent,
@@ -17,6 +19,7 @@ import {
   uploadFacilityLogo,
   deleteFacilityLogo,
   assignLogoToFacility,
+  updateFacilityCoordinates,
   getAssets,
   uploadAsset,
   deleteAsset,
@@ -44,6 +47,10 @@ function Admin() {
           <Image size={16} style={{ marginRight: 6 }} />
           Logos
         </NavLink>
+        <NavLink to="/admin/map" className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}>
+          <MapPin size={16} style={{ marginRight: 6 }} />
+          Map
+        </NavLink>
         <NavLink to="/admin/games" className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}>
           <Gamepad2 size={16} style={{ marginRight: 6 }} />
           Games
@@ -62,6 +69,7 @@ function Admin() {
         <Route path="/" element={<FacilitiesAdmin />} />
         <Route path="/facilities" element={<FacilitiesAdmin />} />
         <Route path="/assets" element={<AssetsAdmin />} />
+        <Route path="/map" element={<MapAdmin />} />
         <Route path="/games" element={<GamesAdmin />} />
         <Route path="/templates" element={<TemplatesAdmin />} />
         <Route path="/content" element={<ContentAdmin />} />
@@ -921,6 +929,346 @@ function TemplatesAdmin() {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// Map Controller - handles auto-fit bounds and fly-to functionality
+function MapController({ markers, selectedFacilityId }) {
+  const map = useMap()
+
+  // Auto-fit bounds when markers change
+  useEffect(() => {
+    if (markers.length > 0) {
+      const bounds = markers.map(m => [m.lat, m.lng])
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 10 })
+    }
+  }, [markers, map])
+
+  // Fly to selected facility
+  useEffect(() => {
+    if (selectedFacilityId) {
+      const marker = markers.find(m => m.facility.id === selectedFacilityId)
+      if (marker) {
+        map.flyTo([marker.lat, marker.lng], 12, { duration: 0.5 })
+      }
+    }
+  }, [selectedFacilityId, markers, map])
+
+  return null
+}
+
+// Map Admin - Display facilities on a map
+function MapAdmin() {
+  const [brands, setBrands] = useState([])
+  const [facilities, setFacilities] = useState([])
+  const [selectedBrand, setSelectedBrand] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [geocoding, setGeocoding] = useState(false)
+  const [geocodingSingle, setGeocodingSingle] = useState(null) // facility ID being geocoded
+  const [markers, setMarkers] = useState([])
+  const [geocodeProgress, setGeocodeProgress] = useState({ current: 0, total: 0 })
+  const [selectedFacilityId, setSelectedFacilityId] = useState(null)
+
+  useEffect(() => { loadBrands() }, [])
+  useEffect(() => { if (selectedBrand) loadFacilities() }, [selectedBrand])
+
+  const loadBrands = async () => {
+    const data = await getBrands()
+    setBrands(data)
+    if (data.length > 0) setSelectedBrand(data[0].id)
+  }
+
+  const loadFacilities = async () => {
+    setLoading(true)
+    const data = await getFacilities({ brand_id: selectedBrand })
+    data.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+    setFacilities(data)
+    setLoading(false)
+    // Build markers from facilities that have coordinates in DB
+    buildMarkersFromFacilities(data)
+  }
+
+  const buildMarkersFromFacilities = (facilitiesList) => {
+    const newMarkers = []
+    facilitiesList.forEach(f => {
+      if (f.latitude && f.longitude) {
+        newMarkers.push({
+          facility: f,
+          lat: f.latitude,
+          lng: f.longitude
+        })
+      }
+    })
+    setMarkers(newMarkers)
+  }
+
+  const geocodeAddress = async (address) => {
+    // Use Nominatim (OpenStreetMap) for geocoding
+    const encoded = encodeURIComponent(address)
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encoded}&limit=1`, {
+      headers: { 'User-Agent': 'WelcomeNights/1.0' }
+    })
+    const data = await response.json()
+    if (data.length > 0) {
+      return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }
+    }
+    return null
+  }
+
+  const buildAddressString = (facility) => {
+    let addressStr = facility.address || ''
+    if (facility.city) addressStr += (addressStr ? ', ' : '') + facility.city
+    if (facility.state) addressStr += (addressStr ? ', ' : '') + facility.state
+    return addressStr
+  }
+
+  const geocodeSingleFacility = async (facility) => {
+    const addressStr = buildAddressString(facility)
+    if (!addressStr) {
+      alert('No address available for this facility')
+      return
+    }
+
+    setGeocodingSingle(facility.id)
+    try {
+      const coords = await geocodeAddress(addressStr)
+      if (coords) {
+        // Save to backend
+        await updateFacilityCoordinates(facility.id, coords.lat, coords.lng)
+        // Reload facilities to get updated data
+        await loadFacilities()
+      } else {
+        alert('Could not find coordinates for this address')
+      }
+    } catch (err) {
+      console.error('Geocoding error for', facility.name, err)
+      alert('Error geocoding: ' + err.message)
+    } finally {
+      setGeocodingSingle(null)
+    }
+  }
+
+  const geocodeAllFacilities = async () => {
+    setGeocoding(true)
+    const facilitiesToGeocode = facilities.filter(f => {
+      const hasAddress = f.address || (f.city && f.state)
+      const notGeocoded = !f.latitude || !f.longitude
+      return hasAddress && notGeocoded
+    })
+
+    setGeocodeProgress({ current: 0, total: facilitiesToGeocode.length })
+
+    for (let i = 0; i < facilitiesToGeocode.length; i++) {
+      const f = facilitiesToGeocode[i]
+      setGeocodeProgress({ current: i + 1, total: facilitiesToGeocode.length })
+
+      const addressStr = buildAddressString(f)
+      if (!addressStr) continue
+
+      try {
+        const coords = await geocodeAddress(addressStr)
+        if (coords) {
+          // Save to backend
+          await updateFacilityCoordinates(f.id, coords.lat, coords.lng)
+        }
+        // Rate limit: Nominatim requires max 1 request per second
+        await new Promise(resolve => setTimeout(resolve, 1100))
+      } catch (err) {
+        console.error('Geocoding error for', f.name, err)
+      }
+    }
+
+    // Reload all facilities to get updated coordinates
+    await loadFacilities()
+    setGeocoding(false)
+  }
+
+  const clearAllCoordinates = async () => {
+    if (!window.confirm('Clear coordinates for all facilities? This cannot be undone.')) return
+
+    setGeocoding(true)
+    try {
+      for (const f of facilities) {
+        if (f.latitude || f.longitude) {
+          await updateFacilityCoordinates(f.id, null, null)
+        }
+      }
+      await loadFacilities()
+    } catch (err) {
+      alert('Error clearing coordinates: ' + err.message)
+    } finally {
+      setGeocoding(false)
+    }
+  }
+
+  const handleFacilityClick = (facilityId) => {
+    const marker = markers.find(m => m.facility.id === facilityId)
+    if (marker) {
+      setSelectedFacilityId(facilityId)
+      // Clear selection after animation
+      setTimeout(() => setSelectedFacilityId(null), 1000)
+    }
+  }
+
+  const facilitiesWithAddress = facilities.filter(f => f.address || (f.city && f.state))
+  const facilitiesWithoutAddress = facilities.filter(f => !f.address && !f.city && !f.state)
+  const facilitiesNeedGeocoding = facilities.filter(f => {
+    const hasAddress = f.address || (f.city && f.state)
+    const notGeocoded = !f.latitude || !f.longitude
+    return hasAddress && notGeocoded
+  })
+
+  return (
+    <div>
+      <div className="wn-filters mb-4">
+        <select className="form-select" value={selectedBrand || ''} onChange={(e) => setSelectedBrand(parseInt(e.target.value))}>
+          {brands.map(brand => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
+        </select>
+        <button
+          className="btn btn-primary btn-sm"
+          onClick={geocodeAllFacilities}
+          disabled={geocoding || loading || facilitiesNeedGeocoding.length === 0}
+        >
+          <MapPin size={16} /> {geocoding ? `Geocoding ${geocodeProgress.current}/${geocodeProgress.total}...` : `Geocode All (${facilitiesNeedGeocoding.length})`}
+        </button>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={clearAllCoordinates}
+          disabled={geocoding || markers.length === 0}
+        >
+          <RefreshCw size={16} /> Clear All Coordinates
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+        <div style={{ background: '#f0fdf4', padding: '8px 16px', borderRadius: 8, fontSize: 14 }}>
+          <strong>{markers.length}</strong> facilities mapped
+        </div>
+        <div style={{ background: '#fef3c7', padding: '8px 16px', borderRadius: 8, fontSize: 14 }}>
+          <strong>{facilitiesNeedGeocoding.length}</strong> need geocoding
+        </div>
+        {facilitiesWithoutAddress.length > 0 && (
+          <div style={{ background: '#fef2f2', padding: '8px 16px', borderRadius: 8, fontSize: 14 }}>
+            <strong>{facilitiesWithoutAddress.length}</strong> missing address
+          </div>
+        )}
+      </div>
+
+      {loading ? <p>Loading facilities...</p> : (
+        <div style={{ display: 'flex', gap: 24 }}>
+          {/* Map */}
+          <div style={{ flex: 2, height: 600, borderRadius: 12, overflow: 'hidden', border: '1px solid #e5e7eb' }}>
+            <MapContainer
+              center={[39.8283, -98.5795]}
+              zoom={4}
+              style={{ height: '100%', width: '100%' }}
+            >
+              <TileLayer
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              <MapController markers={markers} selectedFacilityId={selectedFacilityId} />
+              {markers.map((marker, idx) => (
+                <CircleMarker
+                  key={marker.facility.id}
+                  center={[marker.lat, marker.lng]}
+                  radius={selectedFacilityId === marker.facility.id ? 12 : 8}
+                  fillColor={selectedFacilityId === marker.facility.id ? '#dc2626' : '#0b7280'}
+                  color="#fff"
+                  weight={2}
+                  opacity={1}
+                  fillOpacity={0.8}
+                >
+                  <Popup>
+                    <div style={{ minWidth: 150 }}>
+                      <div style={{ fontWeight: 600, marginBottom: 4 }}>{marker.facility.name}</div>
+                      {marker.facility.city && (
+                        <div style={{ fontSize: 12, color: '#64748b' }}>
+                          {marker.facility.city}, {marker.facility.state}
+                        </div>
+                      )}
+                      {marker.facility.address && (
+                        <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+                          {marker.facility.address}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 8 }}>
+                        {marker.lat.toFixed(4)}, {marker.lng.toFixed(4)}
+                      </div>
+                    </div>
+                  </Popup>
+                </CircleMarker>
+              ))}
+            </MapContainer>
+          </div>
+
+          {/* Facility List */}
+          <div style={{ flex: 1, maxHeight: 600, overflow: 'auto' }}>
+            <h4 style={{ marginBottom: 12 }}>Facilities ({facilities.length})</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {facilities.map(f => {
+                const isGeocoded = f.latitude && f.longitude
+                const hasAddress = f.address || (f.city && f.state)
+                const isGeocodingThis = geocodingSingle === f.id
+                return (
+                  <div
+                    key={f.id}
+                    style={{
+                      padding: '10px 12px',
+                      background: isGeocoded ? '#f0fdf4' : (hasAddress ? '#fef3c7' : '#fef2f2'),
+                      borderRadius: 8,
+                      fontSize: 13,
+                      cursor: isGeocoded ? 'pointer' : 'default',
+                      border: selectedFacilityId === f.id ? '2px solid #0b7280' : '2px solid transparent',
+                      transition: 'all 0.2s'
+                    }}
+                    onClick={() => isGeocoded && handleFacilityClick(f.id)}
+                    title={isGeocoded ? 'Click to zoom to this facility on the map' : ''}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600 }}>{f.name}</div>
+                        {f.city && <div style={{ color: '#6b7280' }}>{f.city}, {f.state}</div>}
+                        {!hasAddress && <div style={{ color: '#dc2626', fontSize: 11 }}>Missing address</div>}
+                        {isGeocoded && (
+                          <div style={{ color: '#059669', fontSize: 11 }}>
+                            📍 {f.latitude.toFixed(4)}, {f.longitude.toFixed(4)}
+                          </div>
+                        )}
+                      </div>
+                      {hasAddress && !isGeocoded && (
+                        <button
+                          className="btn btn-sm btn-ghost"
+                          onClick={(e) => { e.stopPropagation(); geocodeSingleFacility(f) }}
+                          disabled={isGeocodingThis || geocoding}
+                          title="Geocode this facility"
+                          style={{ padding: '4px 8px' }}
+                        >
+                          {isGeocodingThis ? <RefreshCw size={14} className="animate-spin" /> : <MapPin size={14} />}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginTop: 24, padding: 16, background: '#f9fafb', borderRadius: 8, fontSize: 13, color: '#6b7280' }}>
+        <strong>How to use:</strong>
+        <ul style={{ marginTop: 8, paddingLeft: 20 }}>
+          <li>Click "Geocode All" to convert all addresses to map coordinates (saved to database)</li>
+          <li>Click the pin icon next to a facility to geocode just that one</li>
+          <li>Click on a mapped facility in the list to zoom to it on the map</li>
+          <li>Coordinates are stored in the database and persist across sessions</li>
+        </ul>
+        <div style={{ marginTop: 8, fontStyle: 'italic' }}>
+          Note: Geocoding uses OpenStreetMap's Nominatim service (rate limited to 1 request/second).
+        </div>
+      </div>
     </div>
   )
 }

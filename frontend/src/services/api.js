@@ -29,6 +29,7 @@ export const uploadFacilityLogo = async (facilityId, file) => {
 }
 export const deleteFacilityLogo = async (facilityId) => (await api.delete(`/facilities/${facilityId}/logo`)).data
 export const assignLogoToFacility = async (facilityId, assetId) => (await api.put(`/facilities/${facilityId}/assign-logo/${assetId}`)).data
+export const updateFacilityCoordinates = async (facilityId, latitude, longitude) => (await api.put(`/facilities/${facilityId}`, { latitude, longitude })).data
 
 // Templates (PPTX uploads)
 export const getTemplates = async () => (await api.get('/templates')).data

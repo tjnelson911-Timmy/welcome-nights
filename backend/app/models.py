@@ -39,6 +39,8 @@ class Facility(Base):
     address = Column(String(300))
     city = Column(String(100))
     state = Column(String(50))
+    latitude = Column(Float)
+    longitude = Column(Float)
     logo_asset_id = Column(Integer, ForeignKey("assets.id"))
     extra_data = Column(JSON, default={})
     created_at = Column(DateTime, default=datetime.utcnow)

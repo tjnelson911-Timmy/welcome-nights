@@ -560,3 +560,24 @@ def export_pdf(presentation_id: int, db: Session = Depends(get_db)):
 @app.get("/api/health")
 def health_check():
     return {"status": "ok", "service": "Welcome Nights API"}
+
+
+# ============ Static Frontend Serving ============
+FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frontend", "dist")
+
+if os.path.exists(FRONTEND_DIR):
+    # Serve static assets
+    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIR, "assets")), name="frontend-assets")
+
+    # Catch-all route for SPA - must be last
+    @app.get("/{full_path:path}")
+    def serve_spa(full_path: str):
+        # Don't intercept API routes
+        if full_path.startswith("api/") or full_path.startswith("uploads/"):
+            raise HTTPException(404)
+
+        # Serve index.html for all other routes (SPA routing)
+        index_path = os.path.join(FRONTEND_DIR, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        raise HTTPException(404, "Frontend not built")

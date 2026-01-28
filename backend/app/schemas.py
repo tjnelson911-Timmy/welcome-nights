@@ -43,6 +43,8 @@ class FacilityBase(BaseModel):
     address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     logo_asset_id: Optional[int] = None
     extra_data: Optional[Dict[str, Any]] = {}
 
@@ -56,6 +58,8 @@ class FacilityUpdate(BaseModel):
     address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     logo_asset_id: Optional[int] = None
     extra_data: Optional[Dict[str, Any]] = None
 
