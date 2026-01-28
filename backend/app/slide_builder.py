@@ -5,6 +5,7 @@ This module generates slides matching the AV3 Culture Night template structure.
 The AV3 template has 25 slides with a specific order that we replicate here.
 """
 
+import random
 from typing import List, Dict, Optional, Any
 from sqlalchemy.orm import Session
 from . import models, crud
@@ -99,6 +100,7 @@ def build_slides(
 
     # Build slides following AV3 structure
     slides = generate_av3_slides(
+        db=db,
         brand=brand,
         facility=facility,
         facility_logo=facility_logo,
@@ -119,6 +121,7 @@ def build_slides(
 
 
 def generate_av3_slides(
+    db: Session,
     brand: models.Brand,
     facility: models.Facility,
     facility_logo: Optional[str],
@@ -199,36 +202,85 @@ def generate_av3_slides(
         "notes": "History intro image"
     })
 
-    # 5. History Timeline
+    # 5. History Timeline - dates vary by brand
+    brand_slug = (brand.slug or brand.name).lower()
+    if "cascadia" in brand_slug:
+        history_events = [
+            {"date": "March 2015", "text": "Cascadia Healthcare founded"},
+            {"date": "2016-2020", "text": "Rapid expansion across the Pacific Northwest"},
+            {"date": "Today", "text": "65+ facilities and growing"},
+        ]
+    elif "olympus" in brand_slug:
+        history_events = [
+            {"date": "October 2021", "text": "Olympus Healthcare launched"},
+            {"date": "2022-2023", "text": "Expansion into new markets"},
+            {"date": "Today", "text": "Continued growth and excellence"},
+        ]
+    elif "avencare" in brand_slug:
+        history_events = [
+            {"date": "January 2025", "text": "Avencare established"},
+            {"date": "2025", "text": "Building our foundation"},
+            {"date": "Today", "text": "Growing together"},
+        ]
+    else:
+        history_events = [
+            {"date": "Founded", "text": "Company established"},
+            {"date": "Growth", "text": "Expansion began"},
+            {"date": "Today", "text": "Continued success"},
+        ]
+
     slides.append({
         "order": 4,
         "slide_type": "HistoryTimeline",
         "payload": {
             "title": f"The {brand.name} \"Family\"",
-            "events": [
-                {"date": "March 2015", "text": "Company founded"},
-                {"date": "October 2021", "text": "Expansion began"},
-                {"date": "December 2025", "text": "Continued growth"},
-            ],
+            "events": history_events,
             "primary_color": primary_color,
         },
         "notes": "Company history timeline"
     })
 
-    # 6. Footprint Stats
+    # 6. Footprint Stats - include map of facilities
+    # Get all facilities for this brand with coordinates
+    brand_facilities = crud.get_facilities(db, brand_id=brand.id)
+    facilities_with_coords = [f for f in brand_facilities if f.latitude and f.longitude]
+
+    # Generate Mapbox static map URL if we have facilities with coordinates
+    map_url = None
+    if facilities_with_coords:
+        mapbox_token = "pk.eyJ1IjoidGpuZWxzb245MTEiLCJhIjoiY21rZ2hvd2h6MDc1bDNkb256c2ZpZzJ5ZSJ9.GjbF9IEBFXgJl-unUW4hoQ"
+        # Build markers for each facility
+        markers = []
+        for f in facilities_with_coords:
+            # Use teal color marker
+            markers.append(f"pin-s+0b7280({f.longitude},{f.latitude})")
+
+        # Limit markers to avoid URL length issues (max ~50)
+        if len(markers) > 50:
+            markers = markers[:50]
+
+        markers_str = ",".join(markers)
+        # Auto-fit to markers
+        map_url = f"https://api.mapbox.com/styles/v1/mapbox/light-v11/static/{markers_str}/auto/800x500@2x?access_token={mapbox_token}"
+
+    # Count unique states
+    states = set(f.state for f in brand_facilities if f.state)
+    facility_count = len(brand_facilities)
+
     slides.append({
         "order": 5,
         "slide_type": "FootprintStats",
         "payload": {
             "title": "OUR GROWING FOOTPRINT",
             "stats": [
-                {"value": "65+", "label": "Facilities"},
-                {"value": "5", "label": "States"},
+                {"value": f"{facility_count}+", "label": "Facilities"},
+                {"value": str(len(states)), "label": "States"},
                 {"value": "5,000+", "label": "Team Members"},
             ],
+            "map_url": map_url,
             "primary_color": primary_color,
         },
-        "notes": "Company footprint statistics"
+        "notes": "Company footprint statistics with map"
     })
 
     # 7. Regions Map
@@ -289,22 +341,9 @@ def generate_av3_slides(
         "notes": "Field intro transition"
     })
 
-    # 11. Raffle #1
-    if raffle_count >= 1:
-        slides.append({
-            "order": 10,
-            "slide_type": "RaffleBumper",
-            "payload": {
-                "title": "RAFFLE",
-                "subtitle": "Time to draw a winner!",
-                "raffle_number": 1,
-            },
-            "notes": "Raffle #1"
-        })
-
-    # 12. Transition
+    # 11. Transition
     slides.append({
-        "order": 11,
+        "order": 10,
         "slide_type": "TransitionSlide",
         "payload": {},
         "notes": "Transition slide"
@@ -373,20 +412,7 @@ def generate_av3_slides(
         "notes": "Three pillars closing"
     })
 
-    # 24. Raffle #2
-    if raffle_count >= 2:
-        slides.append({
-            "order": len(slides),
-            "slide_type": "RaffleBumper",
-            "payload": {
-                "title": "RAFFLE",
-                "subtitle": "Time to draw another winner!",
-                "raffle_number": 2,
-            },
-            "notes": "Raffle #2"
-        })
-
-    # 25. End Slide
+    # 24. End Slide
     slides.append({
         "order": len(slides),
         "slide_type": "EndSlide",
@@ -397,6 +423,51 @@ def generate_av3_slides(
         },
         "notes": "End slide with logo"
     })
+
+    # Insert raffle slides at random positions throughout the presentation
+    # Avoid the first 3 slides (Title, Welcome, Icebreaker) and last slide (End)
+    if raffle_count > 0:
+        slides = insert_raffle_slides(slides, raffle_count)
+
+    return slides
+
+
+def insert_raffle_slides(slides: List[Dict], raffle_count: int) -> List[Dict]:
+    """
+    Insert raffle slides at random positions throughout the presentation.
+    Avoids first 3 slides and last slide.
+    """
+    # Valid insertion positions: after slide 3 up to before the last slide
+    min_pos = 3  # After Title, Welcome, Icebreaker
+    max_pos = len(slides) - 1  # Before End slide
+
+    # Generate random positions for raffle slides
+    available_positions = list(range(min_pos, max_pos))
+
+    # If we need more raffles than available positions, limit it
+    actual_count = min(raffle_count, len(available_positions))
+
+    # Select random positions and sort them (insert from end to preserve indices)
+    raffle_positions = sorted(random.sample(available_positions, actual_count), reverse=True)
+
+    # Insert raffle slides at the selected positions
+    for i, pos in enumerate(raffle_positions):
+        raffle_num = actual_count - i  # Number raffles in order they appear
+        raffle_slide = {
+            "order": pos,
+            "slide_type": "RaffleBumper",
+            "payload": {
+                "title": "RAFFLE",
+                "subtitle": "Time to draw a winner!",
+                "raffle_number": raffle_num,
+            },
+            "notes": f"Raffle #{raffle_num}"
+        }
+        slides.insert(pos, raffle_slide)
+
+    # Re-number all slides
+    for idx, slide in enumerate(slides):
+        slide["order"] = idx
 
     return slides
 

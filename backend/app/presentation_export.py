@@ -7,6 +7,8 @@ Uses the AV3 Culture Night template as a base for generating presentations.
 
 import io
 import os
+import tempfile
+import urllib.request
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +20,9 @@ from pptx.enum.shapes import MSO_SHAPE
 from pptx.dml.color import RGBColor
 
 from . import models, crud
+
+# Mapbox token for static map images
+MAPBOX_TOKEN = "pk.eyJ1IjoidGpuZWxzb245MTEiLCJhIjoiY21rZ2hvd2h6MDc1bDNkb256c2ZpZzJ5ZSJ9.GjbF9IEBFXgJl-unUW4hoQ"
 
 
 # Slide dimensions (standard 16:9)
@@ -213,20 +218,24 @@ def update_template_slide(
                 if i < len(template_dates):
                     replacements[template_dates[i]] = item.get('year', template_dates[i])
 
-    # Slide 6 (idx 5): Footprint Stats
-    if slide_idx == 5 and 'footprint' in content_map:
-        footprint = content_map['footprint']
-        if footprint.content and 'stats' in footprint.content:
-            stats = footprint.content['stats']
-            # Template values: "48", "9", "1", "3,500", "4,000"
-            # Template labels: "Skilled Nursing", "Senior Living ALF/ILF", "Home Health and Hospice", "Dedicated Employees", "Residents"
-            template_values = ["48", "9", "1", "3,500", "4,000"]
-            template_labels = ["Skilled Nursing", "Senior Living ALF/ILF", "Home Health and Hospice", "Dedicated Employees", "Residents"]
-            for i, stat in enumerate(stats[:len(template_values)]):
-                if i < len(template_values):
-                    replacements[template_values[i]] = str(stat.get('value', template_values[i]))
-                if i < len(template_labels):
-                    replacements[template_labels[i]] = stat.get('label', template_labels[i])
+    # Slide 6 (idx 5): Footprint Stats with Map
+    if slide_idx == 5:
+        # Add map image from facility coordinates
+        add_footprint_map(db, slide, brand)
+
+        if 'footprint' in content_map:
+            footprint = content_map['footprint']
+            if footprint.content and 'stats' in footprint.content:
+                stats = footprint.content['stats']
+                # Template values: "48", "9", "1", "3,500", "4,000"
+                # Template labels: "Skilled Nursing", "Senior Living ALF/ILF", "Home Health and Hospice", "Dedicated Employees", "Residents"
+                template_values = ["48", "9", "1", "3,500", "4,000"]
+                template_labels = ["Skilled Nursing", "Senior Living ALF/ILF", "Home Health and Hospice", "Dedicated Employees", "Residents"]
+                for i, stat in enumerate(stats[:len(template_values)]):
+                    if i < len(template_values):
+                        replacements[template_values[i]] = str(stat.get('value', template_values[i]))
+                    if i < len(template_labels):
+                        replacements[template_labels[i]] = stat.get('label', template_labels[i])
 
     # Slide 7 (idx 6): Regions
     if slide_idx == 6 and 'regions' in content_map:
@@ -264,6 +273,53 @@ def update_template_slide(
             for sub_shape in shape.shapes:
                 if sub_shape.has_text_frame:
                     update_text_frame(sub_shape.text_frame, replacements)
+
+
+def add_footprint_map(db: Session, slide, brand: models.Brand):
+    """
+    Add a map image showing all facility locations to the footprint slide.
+    """
+    # Get all facilities for this brand with coordinates
+    facilities = crud.get_facilities(db, brand_id=brand.id)
+    facilities_with_coords = [f for f in facilities if f.latitude and f.longitude]
+
+    if not facilities_with_coords:
+        return  # No facilities with coordinates, skip map
+
+    # Build Mapbox static map URL with markers
+    markers = []
+    for f in facilities_with_coords[:50]:  # Limit to 50 to avoid URL length issues
+        markers.append(f"pin-s+0b7280({f.longitude},{f.latitude})")
+
+    markers_str = ",".join(markers)
+    map_url = f"https://api.mapbox.com/styles/v1/mapbox/light-v11/static/{markers_str}/auto/800x500@2x?access_token={MAPBOX_TOKEN}"
+
+    try:
+        # Download the map image
+        with urllib.request.urlopen(map_url, timeout=30) as response:
+            image_data = response.read()
+
+        # Save to a temporary file
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+            tmp_file.write(image_data)
+            tmp_path = tmp_file.name
+
+        # Add image to slide - position it on the right side of the slide
+        # Slide is 13.333" x 7.5" (16:9)
+        # Place map on the right half, with some padding
+        left = Inches(6.5)
+        top = Inches(1.5)
+        width = Inches(6.3)
+        height = Inches(4)
+
+        slide.shapes.add_picture(tmp_path, left, top, width, height)
+
+        # Clean up temp file
+        os.unlink(tmp_path)
+
+    except Exception as e:
+        print(f"Error adding map to footprint slide: {e}")
+        # Continue without the map if there's an error
 
 
 def update_text_frame(text_frame, replacements: Dict[str, str]):
