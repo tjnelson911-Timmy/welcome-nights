@@ -800,24 +800,22 @@ function TemplatesAdmin() {
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <FileBox size={20} style={{ color: '#f97316' }} />
-                        <strong>{t.filename}</strong>
+                        <a
+                          href={`http://localhost:8001${t.url}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}
+                        >
+                          {t.filename}
+                        </a>
                       </div>
                     </td>
                     <td>{formatFileSize(t.size)}</td>
                     <td>{formatDate(t.uploaded_at)}</td>
                     <td>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <a
-                          href={`http://localhost:8001${t.url}`}
-                          download
-                          className="btn btn-sm btn-secondary"
-                        >
-                          <Download size={14} /> Download
-                        </a>
-                        <button className="btn btn-sm btn-danger" onClick={() => handleDelete(t.filename)}>
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
+                      <button className="btn btn-sm btn-danger" onClick={() => handleDelete(t.filename)}>
+                        <Trash2 size={14} />
+                      </button>
                     </td>
                   </tr>
                 ))}
