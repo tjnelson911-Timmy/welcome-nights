@@ -1,9 +1,8 @@
 """
 Welcome Nights Presentation Slide Builder Service
 
-This module provides a deterministic slide builder that generates
-ordered slide instances from presentation configuration, agenda templates,
-reusable content, and selected games.
+This module generates slides matching the AV3 Culture Night template structure.
+The AV3 template has 25 slides with a specific order that we replicate here.
 """
 
 from typing import List, Dict, Optional, Any
@@ -11,17 +10,46 @@ from sqlalchemy.orm import Session
 from . import models, crud
 
 
-# Slide type constants
-SLIDE_TYPES = {
-    "WELCOME_INTRO": "WelcomeIntro",
-    "RAFFLE_BUMPER": "RaffleBumper",
-    "HISTORY_BLOCK": "HistoryBlock",
-    "FOOTPRINT_BLOCK": "FootprintBlock",
-    "REGIONS_BLOCK": "RegionsBlock",
-    "CULTURE_BLOCK": "CultureBlock",
-    "GAME_SLIDE": "GameSlide",
-    "PILLARS_CLOSING": "PillarsClosing",
-}
+# AV3 Template slide types in order
+AV3_SLIDE_TYPES = [
+    "TitleSlide",           # 1. Logo/title
+    "WelcomeSlide",         # 2. Welcome to Culture Night
+    "IcebreakerGame",       # 3. Musical Chairs (or other icebreaker)
+    "HistoryIntro",         # 4. History intro image
+    "HistoryTimeline",      # 5. The Cascadia Family timeline
+    "FootprintStats",       # 6. Our Growing Footprint
+    "RegionsMap",           # 7. 5 Healthcare Company Regions
+    "CultureIntro",         # 8. We are NOT corporate!
+    "CultureComparison",    # 9. Common Way vs Cascadia Way
+    "FieldIntro",           # 10. Field/transition
+    "RaffleBumper",         # 11. RAFFLE
+    "TransitionSlide",      # 12. Transition
+    "ValueFamily",          # 13. FAMILY
+    "ChallengeGame",        # 14. Challenge 1: Cookie
+    "ValueOwnership",       # 15. OWNERSHIP
+    "ChallengeGame",        # 16. Challenge 2: Cup Stacking
+    "ValueResponsibility",  # 17. RESPONSIBILITY
+    "ChallengeGame",        # 18. Challenge 3: Marshmallows
+    "ValueCelebration",     # 19. CELEBRATION
+    "ChallengeGame",        # 20. Challenge 4: Pencils
+    "ValueExperience",      # 21. EXPERIENCE
+    "ChallengeGame",        # 22. Challenge 5: Flip Cup
+    "ThreePillars",         # 23. 3 Pillars
+    "RaffleBumper",         # 24. RAFFLE
+    "EndSlide",             # 25. End/logo
+]
+
+# Default games for each challenge slot
+DEFAULT_CHALLENGES = [
+    {"title": "Cookie", "value": "FAMILY", "rules": "Place cookie on forehead, move it to mouth without hands"},
+    {"title": "Cup Stacking", "value": "OWNERSHIP", "rules": "Stack cups into pyramid, then back down"},
+    {"title": "Marshmallows", "value": "RESPONSIBILITY", "rules": "Move marshmallows with chopsticks"},
+    {"title": "Pencils", "value": "CELEBRATION", "rules": "Balance pencils on back of hands"},
+    {"title": "Flip Cup", "value": "EXPERIENCE", "rules": "Drink and flip cup upside down"},
+]
+
+# Core values in order
+CORE_VALUES = ["FAMILY", "OWNERSHIP", "RESPONSIBILITY", "CELEBRATION", "EXPERIENCE"]
 
 
 def build_slides(
@@ -30,40 +58,30 @@ def build_slides(
     config: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
     """
-    Build and save slide instances for a presentation.
+    Build slides matching the AV3 template structure.
 
-    Args:
-        db: Database session
-        presentation_id: ID of the presentation
-        config: Configuration dict containing:
-            - raffle_count: Number of raffle slides to insert
-            - selected_game_ids: List of game IDs to include
-            - include_history: Whether to include history block
-            - include_footprint: Whether to include footprint block
-            - include_regions: Whether to include regions block
-            - include_culture: Whether to include culture block
-
-    Returns:
-        List of slide dictionaries that were created
+    Config options:
+        - raffle_count: Number of raffle slides (default 2, placed at positions 11 and 24)
+        - selected_game_ids: List of game IDs to use for challenges
+        - icebreaker_game_id: Game ID for the icebreaker slot
     """
-    # Get the presentation with relationships
     presentation = crud.get_presentation(db, presentation_id)
     if not presentation:
         raise ValueError(f"Presentation {presentation_id} not found")
 
-    # Get related data
     brand = crud.get_brand(db, presentation.brand_id)
     facility = crud.get_facility(db, presentation.facility_id)
-    agenda_template = crud.get_agenda_template(db, presentation.agenda_template_id)
 
-    if not all([brand, facility, agenda_template]):
-        raise ValueError("Missing required presentation data")
+    if not brand or not facility:
+        raise ValueError("Missing brand or facility data")
 
-    # Get reusable content for the brand
-    reusable_content = {
-        item.content_key: item
-        for item in crud.get_content(db, brand.id)
-    }
+    # Get facility logo
+    facility_logo = None
+    assets = crud.get_assets(db, brand_id=brand.id, asset_type="logo")
+    for asset in assets:
+        if asset.facility_id == facility.id:
+            facility_logo = asset.url
+            break
 
     # Get selected games
     selected_game_ids = config.get("selected_game_ids") or []
@@ -73,18 +91,20 @@ def build_slides(
         if game:
             games.append(game)
 
-    # Build slides based on agenda template
-    slides = generate_slide_order(
-        agenda_template=agenda_template,
+    # Get icebreaker game
+    icebreaker_game_id = config.get("icebreaker_game_id")
+    icebreaker_game = None
+    if icebreaker_game_id:
+        icebreaker_game = crud.get_game(db, icebreaker_game_id)
+
+    # Build slides following AV3 structure
+    slides = generate_av3_slides(
         brand=brand,
         facility=facility,
-        reusable_content=reusable_content,
-        games=games,
-        raffle_count=config.get("raffle_count", 0),
-        include_history=config.get("include_history", True),
-        include_footprint=config.get("include_footprint", True),
-        include_regions=config.get("include_regions", True),
-        include_culture=config.get("include_culture", True),
+        facility_logo=facility_logo,
+        icebreaker_game=icebreaker_game,
+        challenge_games=games,
+        raffle_count=config.get("raffle_count", 2),
     )
 
     # Clear existing slides and create new ones
@@ -98,268 +118,311 @@ def build_slides(
     return slides
 
 
-def generate_slide_order(
-    agenda_template: models.AgendaTemplate,
+def generate_av3_slides(
     brand: models.Brand,
     facility: models.Facility,
-    reusable_content: Dict[str, models.ReusableContent],
-    games: List[models.Game],
-    raffle_count: int,
-    include_history: bool,
-    include_footprint: bool,
-    include_regions: bool,
-    include_culture: bool,
+    facility_logo: Optional[str],
+    icebreaker_game: Optional[models.Game],
+    challenge_games: List[models.Game],
+    raffle_count: int = 2,
 ) -> List[Dict[str, Any]]:
     """
-    Generate the ordered list of slides based on the agenda template.
-
-    The slide_order in the template is a list of slide type strings like:
-    ["WelcomeIntro", "IceBreaker", "RaffleBumper", "HistoryBlock", ...]
+    Generate slides matching the exact AV3 template structure.
     """
     slides = []
-
-    # Get slide order from template, or use default
-    slide_order = agenda_template.slide_order or [
-        "WelcomeIntro", "IceBreaker", "HistoryBlock", "FootprintBlock",
-        "RegionsBlock", "CultureBlock", "ChallengeGame", "PillarsClosing"
-    ]
-
-    # Track which games have been used
-    ice_breaker_games = [g for g in games if g.game_type == "icebreaker"]
-    challenge_games = [g for g in games if g.game_type == "challenge"]
     challenge_index = 0
 
-    for slide_type in slide_order:
-        # Generate slide based on type
-        if slide_type == "WelcomeIntro":
-            slides.append(create_welcome_slide(brand, facility))
+    primary_color = brand.primary_color or "#0b7280"
 
-        elif slide_type == "IceBreaker":
-            if ice_breaker_games:
-                game = ice_breaker_games[0]
-                slides.append(create_game_slide(game, brand, is_icebreaker=True))
-
-        elif slide_type == "RaffleBumper":
-            slides.append(create_raffle_slide(len(slides) + 1))
-
-        elif slide_type == "HistoryBlock" and include_history:
-            content = reusable_content.get("history")
-            if content:
-                slides.append(create_history_slide(content, brand))
-
-        elif slide_type == "FootprintBlock" and include_footprint:
-            content = reusable_content.get("footprint")
-            if content:
-                slides.append(create_footprint_slide(content, brand))
-
-        elif slide_type == "RegionsBlock" and include_regions:
-            content = reusable_content.get("regions")
-            if content:
-                slides.append(create_regions_slide(content, brand))
-
-        elif slide_type == "CultureBlock" and include_culture:
-            content = reusable_content.get("culture")
-            if content:
-                slides.append(create_culture_slide(content, brand))
-
-        elif slide_type == "ChallengeGame":
-            # Add next challenge game
-            if challenge_index < len(challenge_games):
-                slides.append(create_game_slide(challenge_games[challenge_index], brand, is_icebreaker=False))
-                challenge_index += 1
-
-        elif slide_type == "PillarsClosing":
-            slides.append(create_pillars_slide(brand))
-
-    # Re-number slides
-    for idx, slide in enumerate(slides):
-        slide["order"] = idx
-
-    return slides
-
-
-def get_default_slide_blocks() -> List[Dict[str, Any]]:
-    """Return default slide block structure for Culture Night"""
-    return [
-        {"type": "welcome_intro", "required": True},
-        {"type": "icebreaker", "required": False},
-        {"type": "history", "required": False},
-        {"type": "footprint", "required": False},
-        {"type": "regions", "required": False},
-        {"type": "culture", "required": False},
-        {"type": "challenges", "required": False},
-        {"type": "pillars_closing", "required": True},
-    ]
-
-
-def distribute_raffles(raffle_count: int, breakpoints: List[int], total_blocks: int) -> List[int]:
-    """
-    Distribute raffle slides across designated breakpoints.
-
-    Args:
-        raffle_count: Number of raffles to distribute
-        breakpoints: List of block indices where raffles can be inserted
-        total_blocks: Total number of blocks in the template
-
-    Returns:
-        List of block indices where raffles should be inserted (before)
-    """
-    if raffle_count <= 0 or not breakpoints:
-        return []
-
-    # Filter valid breakpoints
-    valid_breakpoints = [bp for bp in breakpoints if bp < total_blocks]
-
-    if not valid_breakpoints:
-        return []
-
-    # Distribute raffles evenly across breakpoints
-    positions = []
-    for i in range(min(raffle_count, len(valid_breakpoints))):
-        positions.append(valid_breakpoints[i])
-
-    return sorted(positions)
-
-
-def create_welcome_slide(brand: models.Brand, facility: models.Facility) -> Dict[str, Any]:
-    """Create welcome/intro slide"""
-    return {
-        "slide_type": SLIDE_TYPES["WELCOME_INTRO"],
+    # 1. Title Slide
+    slides.append({
+        "order": 0,
+        "slide_type": "TitleSlide",
         "payload": {
             "brand_name": brand.name,
-            "brand_slug": brand.slug,
             "facility_name": facility.name,
-            "facility_location": f"{facility.city}, {facility.state}" if facility.city else "",
-            "primary_color": brand.primary_color,
-            "secondary_color": brand.secondary_color,
-            "logo_url": brand.logo_url,
+            "logo_url": facility_logo or brand.logo_url,
         },
-        "notes": "Welcome everyone to Culture Night!"
-    }
+        "notes": "Title slide with facility logo"
+    })
 
-
-def create_raffle_slide(position: int) -> Dict[str, Any]:
-    """Create raffle bumper slide"""
-    return {
-        "slide_type": SLIDE_TYPES["RAFFLE_BUMPER"],
+    # 2. Welcome Slide
+    slides.append({
+        "order": 1,
+        "slide_type": "WelcomeSlide",
         "payload": {
-            "title": "RAFFLE TIME!",
-            "subtitle": "Time to draw a winner!",
-            "position": position,
+            "title": "Welcome to Culture Night!!!",
+            "bullets": [
+                f"We are excited to introduce {brand.name} to you all!",
+                "Help yourself to food and drinks!",
+                "We want this to be fun!!!",
+                "We have raffles and games with prizes, so be ready to participate!",
+            ],
+            "primary_color": primary_color,
         },
-        "notes": "Conduct raffle drawing"
-    }
+        "notes": "Welcome everyone to Culture Night"
+    })
 
+    # 3. Icebreaker Game
+    if icebreaker_game:
+        slides.append({
+            "order": 2,
+            "slide_type": "IcebreakerGame",
+            "payload": {
+                "title": f"Let's break the ice…Game 1: {icebreaker_game.title}",
+                "game_title": icebreaker_game.title,
+                "rules": icebreaker_game.rules,
+                "primary_color": primary_color,
+            },
+            "notes": f"Icebreaker: {icebreaker_game.title}"
+        })
+    else:
+        slides.append({
+            "order": 2,
+            "slide_type": "IcebreakerGame",
+            "payload": {
+                "title": "Let's break the ice…Game 1: Musical Chairs",
+                "game_title": "Musical Chairs",
+                "rules": "5 Players\nMusic plays, players walk\nMusic stops, players sit\nPlayer without a chair is eliminated\nLast player with a seat wins",
+                "primary_color": primary_color,
+            },
+            "notes": "Icebreaker: Musical Chairs"
+        })
 
-def create_history_slide(content: models.ReusableContent, brand: models.Brand) -> Dict[str, Any]:
-    """Create history timeline slide"""
-    return {
-        "slide_type": SLIDE_TYPES["HISTORY_BLOCK"],
+    # 4. History Intro (image slide)
+    slides.append({
+        "order": 3,
+        "slide_type": "HistoryIntro",
         "payload": {
-            "title": content.title or "Our History",
-            "content": content.content or {},
             "brand_name": brand.name,
-            "primary_color": brand.primary_color,
         },
-        "notes": "Walk through the company history and milestones"
-    }
+        "notes": "History intro image"
+    })
 
-
-def create_footprint_slide(content: models.ReusableContent, brand: models.Brand) -> Dict[str, Any]:
-    """Create footprint/stats slide"""
-    return {
-        "slide_type": SLIDE_TYPES["FOOTPRINT_BLOCK"],
+    # 5. History Timeline
+    slides.append({
+        "order": 4,
+        "slide_type": "HistoryTimeline",
         "payload": {
-            "title": content.title or "Our Growing Footprint",
-            "content": content.content or {},
-            "brand_name": brand.name,
-            "primary_color": brand.primary_color,
+            "title": f"The {brand.name} \"Family\"",
+            "events": [
+                {"date": "March 2015", "text": "Company founded"},
+                {"date": "October 2021", "text": "Expansion began"},
+                {"date": "December 2025", "text": "Continued growth"},
+            ],
+            "primary_color": primary_color,
         },
-        "notes": "Highlight company growth and statistics"
-    }
+        "notes": "Company history timeline"
+    })
 
-
-def create_regions_slide(content: models.ReusableContent, brand: models.Brand) -> Dict[str, Any]:
-    """Create regions map slide"""
-    return {
-        "slide_type": SLIDE_TYPES["REGIONS_BLOCK"],
+    # 6. Footprint Stats
+    slides.append({
+        "order": 5,
+        "slide_type": "FootprintStats",
         "payload": {
-            "title": content.title or "Our Regions",
-            "content": content.content or {},
-            "brand_name": brand.name,
-            "primary_color": brand.primary_color,
+            "title": "OUR GROWING FOOTPRINT",
+            "stats": [
+                {"value": "65+", "label": "Facilities"},
+                {"value": "5", "label": "States"},
+                {"value": "5,000+", "label": "Team Members"},
+            ],
+            "primary_color": primary_color,
         },
-        "notes": "Show map of regions and locations"
-    }
+        "notes": "Company footprint statistics"
+    })
 
-
-def create_culture_slide(content: models.ReusableContent, brand: models.Brand) -> Dict[str, Any]:
-    """Create culture block slide"""
-    return {
-        "slide_type": SLIDE_TYPES["CULTURE_BLOCK"],
+    # 7. Regions Map
+    slides.append({
+        "order": 6,
+        "slide_type": "RegionsMap",
         "payload": {
-            "title": content.title or f"The {brand.name} Way",
-            "content": content.content or {},
-            "brand_name": brand.name,
-            "primary_color": brand.primary_color,
+            "title": "5 Healthcare Company Regions",
+            "regions": [
+                {"name": "prior_lake", "label": "Prior Lake"},
+                {"name": "portland", "label": "Portland"},
+                {"name": "olympia", "label": "Olympia"},
+                {"name": "boise", "label": "Boise"},
+                {"name": "denver", "label": "Denver"},
+            ],
+            "primary_color": primary_color,
         },
-        "notes": "Explain the company culture and values - we are not corporate!"
-    }
+        "notes": "Regional map"
+    })
 
-
-def create_game_slide(
-    game: models.Game,
-    brand: models.Brand,
-    is_icebreaker: bool = False
-) -> Dict[str, Any]:
-    """Create game slide"""
-    return {
-        "slide_type": SLIDE_TYPES["GAME_SLIDE"],
+    # 8. Culture Intro - NOT Corporate
+    slides.append({
+        "order": 7,
+        "slide_type": "CultureIntro",
         "payload": {
-            "game_id": game.id,
-            "title": game.title,
-            "description": game.description,
-            "rules": game.rules,
-            "duration_minutes": game.duration_minutes,
-            "value_label": game.value_label,
-            "game_type": game.game_type,
-            "is_icebreaker": is_icebreaker,
-            "brand_name": brand.name,
-            "primary_color": brand.primary_color,
+            "title": "WE ARE NOT CORPORATE!",
+            "subtitle": f"The {brand.name} Way…",
+            "primary_color": primary_color,
         },
-        "notes": f"Game: {game.title}" + (f" - {game.rules}" if game.rules else "")
-    }
+        "notes": "Culture intro - we are not corporate"
+    })
 
-
-def create_pillars_slide(brand: models.Brand) -> Dict[str, Any]:
-    """Create 3 pillars closing slide"""
-    return {
-        "slide_type": SLIDE_TYPES["PILLARS_CLOSING"],
+    # 9. Culture Comparison
+    slides.append({
+        "order": 8,
+        "slide_type": "CultureComparison",
         "payload": {
-            "title": "Our 3 Pillars",
+            "left_title": "The Common Way…",
+            "right_title": f"The {brand.name} Way…",
+            "comparisons": [
+                {"common": "Technically we can't do that…", "ours": "Let's figure it out together!"},
+                {"common": "It's not my job.", "ours": "We are all part of the same team!"},
+                {"common": "That's above my pay grade.", "ours": "Let me connect you with someone who can help!"},
+            ],
+            "primary_color": primary_color,
+        },
+        "notes": "Common way vs our way comparison"
+    })
+
+    # 10. Field Intro
+    slides.append({
+        "order": 9,
+        "slide_type": "FieldIntro",
+        "payload": {
+            "title": "Field",
+            "primary_color": primary_color,
+        },
+        "notes": "Field intro transition"
+    })
+
+    # 11. Raffle #1
+    if raffle_count >= 1:
+        slides.append({
+            "order": 10,
+            "slide_type": "RaffleBumper",
+            "payload": {
+                "title": "RAFFLE",
+                "subtitle": "Time to draw a winner!",
+                "raffle_number": 1,
+            },
+            "notes": "Raffle #1"
+        })
+
+    # 12. Transition
+    slides.append({
+        "order": 11,
+        "slide_type": "TransitionSlide",
+        "payload": {},
+        "notes": "Transition slide"
+    })
+
+    # 13-22. Values and Challenges (5 pairs)
+    for i, value in enumerate(CORE_VALUES):
+        # Value slide
+        slides.append({
+            "order": len(slides),
+            "slide_type": f"Value{value.title()}",
+            "payload": {
+                "value": value,
+                "primary_color": primary_color,
+            },
+            "notes": f"Value: {value}"
+        })
+
+        # Challenge slide
+        if challenge_index < len(challenge_games):
+            game = challenge_games[challenge_index]
+            slides.append({
+                "order": len(slides),
+                "slide_type": "ChallengeGame",
+                "payload": {
+                    "title": f"Challenge {i+1}: {game.title}",
+                    "game_title": game.title,
+                    "rules": game.rules,
+                    "value": value,
+                    "challenge_number": i + 1,
+                    "primary_color": primary_color,
+                },
+                "notes": f"Challenge {i+1}: {game.title}"
+            })
+            challenge_index += 1
+        else:
+            # Use default challenge
+            default = DEFAULT_CHALLENGES[i]
+            slides.append({
+                "order": len(slides),
+                "slide_type": "ChallengeGame",
+                "payload": {
+                    "title": f"Challenge {i+1}: {default['title']}",
+                    "game_title": default["title"],
+                    "rules": default["rules"],
+                    "value": value,
+                    "challenge_number": i + 1,
+                    "primary_color": primary_color,
+                },
+                "notes": f"Challenge {i+1}: {default['title']}"
+            })
+
+    # 23. Three Pillars
+    slides.append({
+        "order": len(slides),
+        "slide_type": "ThreePillars",
+        "payload": {
+            "title": "3 Pillars",
             "pillars": [
-                {"name": "Clinical", "description": "Excellence in care"},
-                {"name": "Cultural", "description": "Our people, our values"},
+                {"name": "Clinical", "description": "Excellence in patient care"},
+                {"name": "Cultural", "description": "Our people and values"},
                 {"name": "Financial", "description": "Sustainable success"},
             ],
-            "brand_name": brand.name,
-            "primary_color": brand.primary_color,
-            "secondary_color": brand.secondary_color,
+            "primary_color": primary_color,
         },
-        "notes": "Close with the 3 pillars: Clinical, Cultural, Financial"
-    }
+        "notes": "Three pillars closing"
+    })
+
+    # 24. Raffle #2
+    if raffle_count >= 2:
+        slides.append({
+            "order": len(slides),
+            "slide_type": "RaffleBumper",
+            "payload": {
+                "title": "RAFFLE",
+                "subtitle": "Time to draw another winner!",
+                "raffle_number": 2,
+            },
+            "notes": "Raffle #2"
+        })
+
+    # 25. End Slide
+    slides.append({
+        "order": len(slides),
+        "slide_type": "EndSlide",
+        "payload": {
+            "brand_name": brand.name,
+            "facility_name": facility.name,
+            "logo_url": facility_logo or brand.logo_url,
+        },
+        "notes": "End slide with logo"
+    })
+
+    return slides
 
 
 def get_slide_type_display_name(slide_type: str) -> str:
     """Get human-readable display name for a slide type"""
     display_names = {
-        "WelcomeIntro": "Welcome & Introduction",
+        "TitleSlide": "Title",
+        "WelcomeSlide": "Welcome",
+        "IcebreakerGame": "Icebreaker Game",
+        "HistoryIntro": "History Intro",
+        "HistoryTimeline": "History Timeline",
+        "FootprintStats": "Our Footprint",
+        "RegionsMap": "Regions",
+        "CultureIntro": "Culture Intro",
+        "CultureComparison": "Culture Comparison",
+        "FieldIntro": "Field",
         "RaffleBumper": "Raffle",
-        "HistoryBlock": "History Timeline",
-        "FootprintBlock": "Our Footprint",
-        "RegionsBlock": "Regions Map",
-        "CultureBlock": "Culture & Values",
-        "GameSlide": "Game / Activity",
-        "PillarsClosing": "3 Pillars Closing",
+        "TransitionSlide": "Transition",
+        "ValueFamily": "FAMILY",
+        "ValueOwnership": "OWNERSHIP",
+        "ValueResponsibility": "RESPONSIBILITY",
+        "ValueCelebration": "CELEBRATION",
+        "ValueExperience": "EXPERIENCE",
+        "ChallengeGame": "Challenge Game",
+        "ThreePillars": "3 Pillars",
+        "EndSlide": "End",
     }
     return display_names.get(slide_type, slide_type)

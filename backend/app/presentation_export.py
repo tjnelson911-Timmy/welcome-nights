@@ -2,12 +2,14 @@
 Welcome Nights Presentation Export Service
 
 This module provides export functionality for presentations to PPTX and PDF formats.
+Uses the AV3 Culture Night template as a base for generating presentations.
 """
 
 import io
 import os
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+from pathlib import Path
 from sqlalchemy.orm import Session
 from pptx import Presentation as PptxPresentation
 from pptx.util import Inches, Pt
@@ -21,6 +23,10 @@ from . import models, crud
 # Slide dimensions (standard 16:9)
 SLIDE_WIDTH = Inches(13.333)
 SLIDE_HEIGHT = Inches(7.5)
+
+# Template path
+TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
+AV3_TEMPLATE = TEMPLATE_DIR / "AV3 Culture Night Presentation - Salem (1)_20260128_020248.pptx"
 
 
 def hex_to_rgb(hex_color: str) -> RGBColor:
@@ -38,7 +44,7 @@ def export_to_pptx(
     output_path: Optional[str] = None
 ) -> bytes:
     """
-    Export a presentation to PPTX format.
+    Export a presentation to PPTX format using the AV3 template.
 
     Args:
         db: Database session
@@ -57,6 +63,182 @@ def export_to_pptx(
     facility = crud.get_facility(db, presentation.facility_id)
     slides = crud.get_presentation_slides(db, presentation_id)
 
+    # Get facility logo by matching filename to facility name
+    facility_logo_path = None
+    assets = crud.get_assets(db, brand_id=brand.id, asset_type="facility_logo")
+    facility_name_lower = facility.name.lower()
+
+    # Try to match logo by facility name in filename
+    for asset in assets:
+        if asset.original_filename:
+            filename_lower = asset.original_filename.lower()
+            # Check if facility name words appear in filename
+            facility_words = facility_name_lower.replace(' of cascadia', '').replace(' health & rehabilitation', '').replace(' transitional care', '').split()
+            if any(word in filename_lower for word in facility_words if len(word) > 3):
+                if asset.url:
+                    if asset.url.startswith('/uploads/'):
+                        facility_logo_path = Path(__file__).parent.parent / asset.url.lstrip('/')
+                    elif asset.url.startswith('uploads/'):
+                        facility_logo_path = Path(__file__).parent.parent / asset.url
+                    break
+
+    # Check if template exists
+    if AV3_TEMPLATE.exists():
+        return export_using_template(
+            presentation, brand, facility, slides, facility_logo_path, output_path
+        )
+    else:
+        # Fallback to generated slides
+        return export_generated_slides(
+            brand, facility, slides, output_path
+        )
+
+
+def export_using_template(
+    presentation: models.Presentation,
+    brand: models.Brand,
+    facility: models.Facility,
+    slides: List[models.PresentationSlide],
+    facility_logo_path: Optional[Path] = None,
+    output_path: Optional[str] = None
+) -> bytes:
+    """
+    Export presentation using the AV3 template as a base.
+    Replaces facility logo on title and end slides.
+    """
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    # Load the template
+    pptx = PptxPresentation(str(AV3_TEMPLATE))
+
+    # Build a map of slide types to their indices in our slides data
+    slide_data_map = {s.slide_type: s for s in slides}
+
+    # Process each template slide
+    for slide_idx, slide in enumerate(pptx.slides):
+        # Replace logo on slide 1 (title) and slide 25 (end)
+        if facility_logo_path and facility_logo_path.exists():
+            if slide_idx == 0 or slide_idx == len(list(pptx.slides)) - 1:
+                replace_slide_logo(slide, facility_logo_path)
+
+        # Update text content
+        update_template_slide(slide, slide_idx, brand, facility, slide_data_map)
+
+    # Save to bytes
+    buffer = io.BytesIO()
+    pptx.save(buffer)
+    buffer.seek(0)
+    pptx_bytes = buffer.read()
+
+    if output_path:
+        with open(output_path, 'wb') as f:
+            f.write(pptx_bytes)
+
+    return pptx_bytes
+
+
+def replace_slide_logo(slide, logo_path: Path):
+    """
+    Replace the main logo/picture on a slide with the facility logo.
+    Finds the largest picture on the slide and replaces it.
+    """
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+    from pptx.util import Emu
+
+    # Find the largest picture shape (likely the logo)
+    largest_picture = None
+    largest_area = 0
+
+    for shape in slide.shapes:
+        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+            area = shape.width * shape.height
+            if area > largest_area:
+                largest_area = area
+                largest_picture = shape
+
+    if largest_picture:
+        # Store position and size
+        left = largest_picture.left
+        top = largest_picture.top
+        width = largest_picture.width
+        height = largest_picture.height
+
+        # Remove old picture
+        sp = largest_picture._element
+        sp.getparent().remove(sp)
+
+        # Add new picture at same position
+        try:
+            slide.shapes.add_picture(
+                str(logo_path),
+                left, top, width, height
+            )
+        except Exception as e:
+            print(f"Error adding logo: {e}")
+
+
+def update_template_slide(
+    slide,
+    slide_idx: int,
+    brand: models.Brand,
+    facility: models.Facility,
+    slide_data_map: Dict[str, models.PresentationSlide]
+):
+    """
+    Update a template slide by replacing placeholder text with actual content.
+    Preserves all formatting, images, and design elements.
+    """
+    # Define text replacements for brand customization only
+    # Note: We don't replace facility/location names - keep template as-is
+    replacements = {
+        "Cascadia": brand.name,
+        "cascadia": brand.name.lower(),
+    }
+
+    # Process all shapes in the slide
+    for shape in slide.shapes:
+        if shape.has_text_frame:
+            update_text_frame(shape.text_frame, replacements)
+
+        # Handle tables
+        if shape.has_table:
+            for row in shape.table.rows:
+                for cell in row.cells:
+                    update_text_frame(cell.text_frame, replacements)
+
+        # Handle grouped shapes
+        if hasattr(shape, 'shapes'):
+            for sub_shape in shape.shapes:
+                if sub_shape.has_text_frame:
+                    update_text_frame(sub_shape.text_frame, replacements)
+
+
+def update_text_frame(text_frame, replacements: Dict[str, str]):
+    """
+    Update text in a text frame while preserving formatting.
+    """
+    for paragraph in text_frame.paragraphs:
+        for run in paragraph.runs:
+            original_text = run.text
+            new_text = original_text
+
+            for old_text, new_text_value in replacements.items():
+                if old_text in new_text:
+                    new_text = new_text.replace(old_text, new_text_value)
+
+            if new_text != original_text:
+                run.text = new_text
+
+
+def export_generated_slides(
+    brand: models.Brand,
+    facility: models.Facility,
+    slides: List[models.PresentationSlide],
+    output_path: Optional[str] = None
+) -> bytes:
+    """
+    Fallback: Generate slides from scratch when template is not available.
+    """
     # Create PPTX
     pptx = PptxPresentation()
     pptx.slide_width = SLIDE_WIDTH
