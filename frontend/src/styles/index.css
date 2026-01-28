@@ -120,35 +120,36 @@ body {
 
 .sidebar-nav {
   list-style: none;
-  padding: 12px 8px;
+  padding: 16px 12px;
   flex: 1;
 }
 
 .sidebar-nav li {
-  margin-bottom: 2px;
+  margin-bottom: 4px;
 }
 
 .sidebar-nav a {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  color: var(--gray-400);
+  gap: 14px;
+  padding: 14px 16px;
+  color: rgba(255, 255, 255, 0.7);
   text-decoration: none;
   border-radius: var(--radius-md);
   transition: all 0.15s ease;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
 }
 
 .sidebar-nav a:hover {
-  background: rgba(255,255,255,0.05);
+  background: rgba(255,255,255,0.1);
   color: white;
 }
 
 .sidebar-nav a.active {
   background: var(--primary);
   color: white;
+  font-weight: 600;
 }
 
 .sidebar-nav a svg {

@@ -4,27 +4,31 @@ import { Presentation, Settings } from 'lucide-react'
 
 function Layout() {
   return (
-    <div className="app-container">
-      <nav className="sidebar">
+    <div className="app-layout">
+      <aside className="sidebar">
         <div className="sidebar-header">
-          <h1>Welcome Nights</h1>
-          <p>Culture Night Builder</p>
+          <div className="sidebar-logo">
+            Welcome<span>Nights</span>
+          </div>
+          <div className="sidebar-tagline">Culture Night Builder</div>
         </div>
-        <ul className="nav-list">
-          <li>
-            <NavLink to="/" className={({ isActive }) => isActive ? 'active' : ''}>
-              <Presentation size={18} />
-              <span>Presentations</span>
-            </NavLink>
-          </li>
-          <li>
-            <NavLink to="/admin" className={({ isActive }) => isActive ? 'active' : ''}>
-              <Settings size={18} />
-              <span>Admin</span>
-            </NavLink>
-          </li>
-        </ul>
-      </nav>
+        <nav>
+          <ul className="sidebar-nav">
+            <li>
+              <NavLink to="/" className={({ isActive }) => isActive ? 'active' : ''} end>
+                <Presentation size={20} />
+                <span>Presentations</span>
+              </NavLink>
+            </li>
+            <li>
+              <NavLink to="/admin" className={({ isActive }) => isActive ? 'active' : ''}>
+                <Settings size={20} />
+                <span>Admin</span>
+              </NavLink>
+            </li>
+          </ul>
+        </nav>
+      </aside>
       <main className="main-content">
         <Outlet />
       </main>
