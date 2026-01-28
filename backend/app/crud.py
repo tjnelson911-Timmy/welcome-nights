@@ -270,3 +270,25 @@ def delete_presentation_slides(db: Session, presentation_id: int) -> int:
     ).delete()
     db.commit()
     return count
+
+
+def clear_presentation_slides(db: Session, presentation_id: int) -> int:
+    """Clear all slides for a presentation (alias for delete_presentation_slides)"""
+    return delete_presentation_slides(db, presentation_id)
+
+
+def bulk_create_slides(db: Session, presentation_id: int, slides: List[dict]) -> List[models.PresentationSlide]:
+    """Bulk create slides for a presentation"""
+    db_slides = []
+    for slide_data in slides:
+        db_slide = models.PresentationSlide(
+            presentation_id=presentation_id,
+            order=slide_data.get("order", 0),
+            slide_type=slide_data.get("slide_type", ""),
+            payload=slide_data.get("payload", {}),
+            notes=slide_data.get("notes", "")
+        )
+        db.add(db_slide)
+        db_slides.append(db_slide)
+    db.commit()
+    return db_slides

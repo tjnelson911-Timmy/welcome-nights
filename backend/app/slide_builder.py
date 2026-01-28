@@ -62,11 +62,11 @@ def build_slides(
     # Get reusable content for the brand
     reusable_content = {
         item.content_key: item
-        for item in crud.get_reusable_content(db, brand.id)
+        for item in crud.get_content(db, brand.id)
     }
 
     # Get selected games
-    selected_game_ids = config.get("selected_game_ids", [])
+    selected_game_ids = config.get("selected_game_ids") or []
     games = []
     for gid in selected_game_ids:
         game = crud.get_game(db, gid)
@@ -113,83 +113,63 @@ def generate_slide_order(
     """
     Generate the ordered list of slides based on the agenda template.
 
-    The default Culture Night flow is:
-    1. Welcome Intro
-    2. Ice Breaker Game
-    3. History Timeline (optional)
-    4. Our Growing Footprint (optional)
-    5. Regions Map (optional)
-    6. Culture - Cascadia Way (optional)
-    7. Challenge Games (minute-to-win-it)
-    8. Pillars Closing
-
-    Raffle slides are inserted at designated breakpoints.
+    The slide_order in the template is a list of slide type strings like:
+    ["WelcomeIntro", "IceBreaker", "RaffleBumper", "HistoryBlock", ...]
     """
     slides = []
 
-    # Get slide blocks from template, or use default
-    slide_blocks = agenda_template.slide_blocks or get_default_slide_blocks()
-    raffle_breakpoints = agenda_template.raffle_breakpoints or [2, 4, 6]
-
-    # Calculate raffle insertion points
-    raffle_positions = distribute_raffles(raffle_count, raffle_breakpoints, len(slide_blocks))
+    # Get slide order from template, or use default
+    slide_order = agenda_template.slide_order or [
+        "WelcomeIntro", "IceBreaker", "HistoryBlock", "FootprintBlock",
+        "RegionsBlock", "CultureBlock", "ChallengeGame", "PillarsClosing"
+    ]
 
     # Track which games have been used
     ice_breaker_games = [g for g in games if g.game_type == "icebreaker"]
     challenge_games = [g for g in games if g.game_type == "challenge"]
+    challenge_index = 0
 
-    game_index = 0  # For challenge games
-
-    for block_idx, block in enumerate(slide_blocks):
-        block_type = block.get("type")
-
-        # Check if raffle should be inserted before this block
-        if block_idx in raffle_positions:
-            slides.append(create_raffle_slide(len(slides) + 1))
-
-        # Generate slide based on block type
-        if block_type == "welcome_intro":
+    for slide_type in slide_order:
+        # Generate slide based on type
+        if slide_type == "WelcomeIntro":
             slides.append(create_welcome_slide(brand, facility))
 
-        elif block_type == "icebreaker":
+        elif slide_type == "IceBreaker":
             if ice_breaker_games:
                 game = ice_breaker_games[0]
                 slides.append(create_game_slide(game, brand, is_icebreaker=True))
 
-        elif block_type == "history" and include_history:
+        elif slide_type == "RaffleBumper":
+            slides.append(create_raffle_slide(len(slides) + 1))
+
+        elif slide_type == "HistoryBlock" and include_history:
             content = reusable_content.get("history")
             if content:
                 slides.append(create_history_slide(content, brand))
 
-        elif block_type == "footprint" and include_footprint:
+        elif slide_type == "FootprintBlock" and include_footprint:
             content = reusable_content.get("footprint")
             if content:
                 slides.append(create_footprint_slide(content, brand))
 
-        elif block_type == "regions" and include_regions:
+        elif slide_type == "RegionsBlock" and include_regions:
             content = reusable_content.get("regions")
             if content:
                 slides.append(create_regions_slide(content, brand))
 
-        elif block_type == "culture" and include_culture:
+        elif slide_type == "CultureBlock" and include_culture:
             content = reusable_content.get("culture")
             if content:
                 slides.append(create_culture_slide(content, brand))
 
-        elif block_type == "challenges":
-            # Add all challenge games
-            for game in challenge_games:
-                slides.append(create_game_slide(game, brand, is_icebreaker=False))
+        elif slide_type == "ChallengeGame":
+            # Add next challenge game
+            if challenge_index < len(challenge_games):
+                slides.append(create_game_slide(challenge_games[challenge_index], brand, is_icebreaker=False))
+                challenge_index += 1
 
-        elif block_type == "pillars_closing":
+        elif slide_type == "PillarsClosing":
             slides.append(create_pillars_slide(brand))
-
-    # Add any remaining raffles at the end (before pillars)
-    remaining_raffles = raffle_count - sum(1 for p in raffle_positions if p < len(slide_blocks))
-    if remaining_raffles > 0 and slides:
-        # Insert before the last slide (Pillars)
-        for _ in range(remaining_raffles):
-            slides.insert(-1, create_raffle_slide(0))  # Order will be fixed
 
     # Re-number slides
     for idx, slide in enumerate(slides):

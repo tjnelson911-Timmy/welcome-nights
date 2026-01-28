@@ -15,15 +15,15 @@ function Layout() {
         <nav>
           <ul className="sidebar-nav">
             <li>
-              <NavLink to="/" className={({ isActive }) => isActive ? 'active' : ''} end>
-                <Presentation size={20} />
-                <span>Presentations</span>
+              <NavLink to="/admin" className={({ isActive }) => isActive ? 'active' : ''}>
+                <Settings size={20} />
+                <span>Dashboard</span>
               </NavLink>
             </li>
             <li>
-              <NavLink to="/admin" className={({ isActive }) => isActive ? 'active' : ''}>
-                <Settings size={20} />
-                <span>Admin</span>
+              <NavLink to="/" className={({ isActive }) => isActive ? 'active' : ''} end>
+                <Presentation size={20} />
+                <span>Presentations</span>
               </NavLink>
             </li>
           </ul>
