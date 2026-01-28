@@ -63,29 +63,20 @@ def export_to_pptx(
     facility = crud.get_facility(db, presentation.facility_id)
     slides = crud.get_presentation_slides(db, presentation_id)
 
-    # Get facility logo by matching filename to facility name
+    # Get facility logo from assigned logo_asset_id
     facility_logo_path = None
-    assets = crud.get_assets(db, brand_id=brand.id, asset_type="facility_logo")
-    facility_name_lower = facility.name.lower()
-
-    # Try to match logo by facility name in filename
-    for asset in assets:
-        if asset.original_filename:
-            filename_lower = asset.original_filename.lower()
-            # Check if facility name words appear in filename
-            facility_words = facility_name_lower.replace(' of cascadia', '').replace(' health & rehabilitation', '').replace(' transitional care', '').split()
-            if any(word in filename_lower for word in facility_words if len(word) > 3):
-                if asset.url:
-                    if asset.url.startswith('/uploads/'):
-                        facility_logo_path = Path(__file__).parent.parent / asset.url.lstrip('/')
-                    elif asset.url.startswith('uploads/'):
-                        facility_logo_path = Path(__file__).parent.parent / asset.url
-                    break
+    if facility.logo_asset_id:
+        asset = crud.get_asset(db, facility.logo_asset_id)
+        if asset and asset.url:
+            if asset.url.startswith('/uploads/'):
+                facility_logo_path = Path(__file__).parent.parent / asset.url.lstrip('/')
+            elif asset.url.startswith('uploads/'):
+                facility_logo_path = Path(__file__).parent.parent / asset.url
 
     # Check if template exists
     if AV3_TEMPLATE.exists():
         return export_using_template(
-            presentation, brand, facility, slides, facility_logo_path, output_path
+            db, presentation, brand, facility, slides, facility_logo_path, output_path
         )
     else:
         # Fallback to generated slides
@@ -95,6 +86,7 @@ def export_to_pptx(
 
 
 def export_using_template(
+    db: Session,
     presentation: models.Presentation,
     brand: models.Brand,
     facility: models.Facility,
@@ -105,11 +97,16 @@ def export_using_template(
     """
     Export presentation using the AV3 template as a base.
     Replaces facility logo on title and end slides.
+    Uses reusable content from database for history, footprint, regions, culture.
     """
     from pptx.enum.shapes import MSO_SHAPE_TYPE
 
     # Load the template
     pptx = PptxPresentation(str(AV3_TEMPLATE))
+
+    # Load reusable content for the brand
+    content_items = crud.get_content(db, brand.id)
+    content_map = {item.content_key: item for item in content_items}
 
     # Build a map of slide types to their indices in our slides data
     slide_data_map = {s.slide_type: s for s in slides}
@@ -121,8 +118,8 @@ def export_using_template(
             if slide_idx == 0 or slide_idx == len(list(pptx.slides)) - 1:
                 replace_slide_logo(slide, facility_logo_path)
 
-        # Update text content
-        update_template_slide(slide, slide_idx, brand, facility, slide_data_map)
+        # Update text content with brand name and reusable content
+        update_template_slide(slide, slide_idx, brand, facility, slide_data_map, content_map)
 
     # Save to bytes
     buffer = io.BytesIO()
@@ -182,18 +179,74 @@ def update_template_slide(
     slide_idx: int,
     brand: models.Brand,
     facility: models.Facility,
-    slide_data_map: Dict[str, models.PresentationSlide]
+    slide_data_map: Dict[str, models.PresentationSlide],
+    content_map: Dict[str, models.ReusableContent] = None
 ):
     """
     Update a template slide by replacing placeholder text with actual content.
     Preserves all formatting, images, and design elements.
+    Uses reusable content from database for specific slides.
+
+    AV3 Template Structure:
+    - Slide 5 (idx 4): History Timeline - dates and "The Cascadia Family"
+    - Slide 6 (idx 5): Footprint Stats - numbers and labels
+    - Slide 7 (idx 6): Regions - region names
+    - Slide 8 (idx 7): Culture Intro - "WE ARE NOT CORPORATE!"
+    - Slide 9 (idx 8): Culture Comparison - "The Common Way..."
     """
-    # Define text replacements for brand customization only
-    # Note: We don't replace facility/location names - keep template as-is
+    content_map = content_map or {}
+
+    # Define text replacements for brand customization
     replacements = {
         "Cascadia": brand.name,
         "cascadia": brand.name.lower(),
     }
+
+    # Slide 5 (idx 4): History Timeline
+    if slide_idx == 4 and 'history' in content_map:
+        history = content_map['history']
+        if history.content and 'items' in history.content:
+            items = history.content['items']
+            # Template has: "March 2015", "October 2021", "December 2025"
+            template_dates = ["March 2015", "October 2021", "December 2025"]
+            for i, item in enumerate(items[:len(template_dates)]):
+                if i < len(template_dates):
+                    replacements[template_dates[i]] = item.get('year', template_dates[i])
+
+    # Slide 6 (idx 5): Footprint Stats
+    if slide_idx == 5 and 'footprint' in content_map:
+        footprint = content_map['footprint']
+        if footprint.content and 'stats' in footprint.content:
+            stats = footprint.content['stats']
+            # Template values: "48", "9", "1", "3,500", "4,000"
+            # Template labels: "Skilled Nursing", "Senior Living ALF/ILF", "Home Health and Hospice", "Dedicated Employees", "Residents"
+            template_values = ["48", "9", "1", "3,500", "4,000"]
+            template_labels = ["Skilled Nursing", "Senior Living ALF/ILF", "Home Health and Hospice", "Dedicated Employees", "Residents"]
+            for i, stat in enumerate(stats[:len(template_values)]):
+                if i < len(template_values):
+                    replacements[template_values[i]] = str(stat.get('value', template_values[i]))
+                if i < len(template_labels):
+                    replacements[template_labels[i]] = stat.get('label', template_labels[i])
+
+    # Slide 7 (idx 6): Regions
+    if slide_idx == 6 and 'regions' in content_map:
+        regions = content_map['regions']
+        if regions.content and 'regions' in regions.content:
+            region_list = regions.content['regions']
+            # Template regions
+            template_regions = [
+                "Columbia (OR, Western WA)",
+                "Northern (Eastern WA, Northern ID, MT)",
+                "3 Rivers (Central - ID)",
+                "Envision (Southern – ID)",
+                "Vincero (AZ)"
+            ]
+            for i, region in enumerate(region_list[:len(template_regions)]):
+                if i < len(template_regions):
+                    region_name = region.get('name', '')
+                    if region.get('facilities'):
+                        region_name += f" ({region['facilities']} facilities)"
+                    replacements[template_regions[i]] = region_name
 
     # Process all shapes in the slide
     for shape in slide.shapes:

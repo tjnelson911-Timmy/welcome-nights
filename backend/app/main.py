@@ -220,19 +220,33 @@ def delete_facility_logo(facility_id: int, db: Session = Depends(get_db)):
     if not facility:
         raise HTTPException(404, "Facility not found")
 
-    if facility.logo_asset_id:
-        asset = crud.get_asset(db, facility.logo_asset_id)
-        if asset:
-            try:
-                os.remove(os.path.join(UPLOAD_DIR, asset.filename))
-            except:
-                pass
-            crud.delete_asset(db, asset.id)
-
-        facility.logo_asset_id = None
-        db.commit()
+    facility.logo_asset_id = None
+    db.commit()
 
     return {"message": "Logo removed"}
+
+
+@app.put("/api/facilities/{facility_id}/assign-logo/{asset_id}")
+def assign_logo_to_facility(facility_id: int, asset_id: int, db: Session = Depends(get_db)):
+    """Assign an existing logo asset to a facility"""
+    facility = crud.get_facility(db, facility_id)
+    if not facility:
+        raise HTTPException(404, "Facility not found")
+
+    asset = crud.get_asset(db, asset_id)
+    if not asset:
+        raise HTTPException(404, "Asset not found")
+
+    facility.logo_asset_id = asset_id
+    db.commit()
+    db.refresh(facility)
+
+    return {
+        "message": "Logo assigned",
+        "facility_id": facility_id,
+        "asset_id": asset_id,
+        "logo_url": asset.url
+    }
 
 
 # ============ Asset Endpoints ============

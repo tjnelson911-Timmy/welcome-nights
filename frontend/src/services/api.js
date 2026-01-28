@@ -28,6 +28,7 @@ export const uploadFacilityLogo = async (facilityId, file) => {
   return (await api.post(`/facilities/${facilityId}/logo`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })).data
 }
 export const deleteFacilityLogo = async (facilityId) => (await api.delete(`/facilities/${facilityId}/logo`)).data
+export const assignLogoToFacility = async (facilityId, assetId) => (await api.put(`/facilities/${facilityId}/assign-logo/${assetId}`)).data
 
 // Templates (PPTX uploads)
 export const getTemplates = async () => (await api.get('/templates')).data

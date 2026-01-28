@@ -16,6 +16,7 @@ import {
   importFacilities,
   uploadFacilityLogo,
   deleteFacilityLogo,
+  assignLogoToFacility,
   getAssets,
   uploadAsset,
   deleteAsset,
@@ -35,14 +36,6 @@ function Admin() {
       </div>
 
       <div className="tabs mb-4">
-        <NavLink to="/admin/content" className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}>
-          <FileText size={16} style={{ marginRight: 6 }} />
-          Content
-        </NavLink>
-        <NavLink to="/admin/games" className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}>
-          <Gamepad2 size={16} style={{ marginRight: 6 }} />
-          Games
-        </NavLink>
         <NavLink to="/admin/facilities" className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}>
           <Building2 size={16} style={{ marginRight: 6 }} />
           Facilities
@@ -51,19 +44,27 @@ function Admin() {
           <Image size={16} style={{ marginRight: 6 }} />
           Logos
         </NavLink>
+        <NavLink to="/admin/games" className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}>
+          <Gamepad2 size={16} style={{ marginRight: 6 }} />
+          Games
+        </NavLink>
         <NavLink to="/admin/templates" className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}>
           <FileBox size={16} style={{ marginRight: 6 }} />
           Templates
         </NavLink>
+        <NavLink to="/admin/content" className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}>
+          <FileText size={16} style={{ marginRight: 6 }} />
+          Content
+        </NavLink>
       </div>
 
       <Routes>
-        <Route path="/" element={<ContentAdmin />} />
-        <Route path="/content" element={<ContentAdmin />} />
-        <Route path="/games" element={<GamesAdmin />} />
+        <Route path="/" element={<FacilitiesAdmin />} />
         <Route path="/facilities" element={<FacilitiesAdmin />} />
         <Route path="/assets" element={<AssetsAdmin />} />
+        <Route path="/games" element={<GamesAdmin />} />
         <Route path="/templates" element={<TemplatesAdmin />} />
+        <Route path="/content" element={<ContentAdmin />} />
       </Routes>
     </div>
   )
@@ -341,6 +342,7 @@ function FacilitiesAdmin() {
   const [brands, setBrands] = useState([])
   const [facilities, setFacilities] = useState([])
   const [assets, setAssets] = useState({})
+  const [allLogos, setAllLogos] = useState([])
   const [selectedBrand, setSelectedBrand] = useState(null)
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -349,6 +351,7 @@ function FacilitiesAdmin() {
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState(null)
   const [uploadingLogo, setUploadingLogo] = useState(null)
+  const [showLogoSelector, setShowLogoSelector] = useState(null) // facility ID for logo selection
   const importFileRef = useRef(null)
   const logoFileRefs = useRef({})
 
@@ -366,11 +369,19 @@ function FacilitiesAdmin() {
     const data = await getFacilities({ brand_id: selectedBrand })
     data.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
     setFacilities(data)
-    // Load assets to get logo URLs
-    const assetData = await getAssets({ brand_id: selectedBrand, asset_type: 'facility_logo' })
+    // Load all assets to get logo URLs
+    const assetData = await getAssets({ brand_id: selectedBrand })
     const assetMap = {}
-    assetData.forEach(a => { assetMap[a.id] = a })
+    const logos = []
+    assetData.forEach(a => {
+      assetMap[a.id] = a
+      if (a.asset_type === 'facility_logo' || a.asset_type === 'logo') {
+        logos.push(a)
+      }
+    })
+    logos.sort((a, b) => (a.original_filename || '').localeCompare(b.original_filename || ''))
     setAssets(assetMap)
+    setAllLogos(logos)
     setLoading(false)
   }
 
@@ -448,6 +459,20 @@ function FacilitiesAdmin() {
     } catch (err) {
       alert('Error removing logo')
     }
+  }
+
+  const handleAssignLogo = async (facilityId, assetId) => {
+    try {
+      await assignLogoToFacility(facilityId, assetId)
+      setShowLogoSelector(null)
+      loadFacilities()
+    } catch (err) {
+      alert('Error assigning logo: ' + (err.response?.data?.detail || err.message))
+    }
+  }
+
+  const openLogoSelector = (facilityId) => {
+    setShowLogoSelector(facilityId)
   }
 
   const downloadTemplate = () => {
@@ -540,7 +565,11 @@ function FacilitiesAdmin() {
                 <td>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     {f.logo_asset_id && assets[f.logo_asset_id] ? (
-                      <div style={{ position: 'relative', width: 50, height: 50 }}>
+                      <div
+                        style={{ position: 'relative', width: 50, height: 50, cursor: 'pointer' }}
+                        onClick={() => openLogoSelector(f.id)}
+                        title="Click to change logo"
+                      >
                         <img
                           src={`http://localhost:8001${assets[f.logo_asset_id].url}`}
                           alt={f.name}
@@ -548,7 +577,7 @@ function FacilitiesAdmin() {
                         />
                         <button
                           className="btn btn-sm btn-danger"
-                          onClick={() => handleLogoDelete(f.id)}
+                          onClick={(e) => { e.stopPropagation(); handleLogoDelete(f.id) }}
                           style={{ position: 'absolute', top: -8, right: -8, padding: 2, minWidth: 20, height: 20 }}
                           title="Remove logo"
                         >
@@ -556,35 +585,24 @@ function FacilitiesAdmin() {
                         </button>
                       </div>
                     ) : (
-                      <label style={{ cursor: 'pointer' }}>
-                        <div
-                          style={{
-                            width: 50,
-                            height: 50,
-                            borderRadius: 4,
-                            background: '#f3f4f6',
-                            border: '2px dashed #d1d5db',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: '#9ca3af'
-                          }}
-                          title="Click to upload logo (PNG)"
-                        >
-                          {uploadingLogo === f.id ? (
-                            <div className="animate-spin" style={{ width: 16, height: 16, border: '2px solid #9ca3af', borderTopColor: 'transparent', borderRadius: '50%' }} />
-                          ) : (
-                            <Image size={20} />
-                          )}
-                        </div>
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg,image/gif,image/webp"
-                          onChange={(e) => handleLogoUpload(f.id, e)}
-                          style={{ display: 'none' }}
-                          disabled={uploadingLogo === f.id}
-                        />
-                      </label>
+                      <div
+                        onClick={() => openLogoSelector(f.id)}
+                        style={{
+                          width: 50,
+                          height: 50,
+                          borderRadius: 4,
+                          background: '#f3f4f6',
+                          border: '2px dashed #d1d5db',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#9ca3af',
+                          cursor: 'pointer'
+                        }}
+                        title="Click to select a logo"
+                      >
+                        <Image size={20} />
+                      </div>
                     )}
                   </div>
                 </td>
@@ -604,6 +622,85 @@ function FacilitiesAdmin() {
             )}
           </tbody>
         </table>
+      )}
+
+      {/* Logo Selector Modal */}
+      {showLogoSelector && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000
+          }}
+          onClick={() => setShowLogoSelector(null)}
+        >
+          <div
+            style={{
+              background: 'white',
+              borderRadius: 12,
+              padding: 24,
+              maxWidth: 800,
+              maxHeight: '80vh',
+              overflow: 'auto',
+              width: '90%'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>
+                Select Logo for: {facilities.find(f => f.id === showLogoSelector)?.name}
+              </h3>
+              <button className="btn btn-sm btn-ghost" onClick={() => setShowLogoSelector(null)}>
+                <X size={20} />
+              </button>
+            </div>
+            <p style={{ color: '#6b7280', marginBottom: 16 }}>
+              Click on a logo to assign it to this facility. Logos are from the Logos tab.
+            </p>
+            {allLogos.length === 0 ? (
+              <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>
+                No logos available. Upload logos in the Logos tab first.
+              </p>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 12 }}>
+                {allLogos.map(logo => (
+                  <div
+                    key={logo.id}
+                    onClick={() => handleAssignLogo(showLogoSelector, logo.id)}
+                    style={{
+                      padding: 8,
+                      borderRadius: 8,
+                      border: '2px solid #e5e7eb',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      background: facilities.find(f => f.id === showLogoSelector)?.logo_asset_id === logo.id ? '#e0f2fe' : 'white'
+                    }}
+                    onMouseOver={(e) => e.currentTarget.style.borderColor = '#0b7280'}
+                    onMouseOut={(e) => e.currentTarget.style.borderColor = '#e5e7eb'}
+                  >
+                    <div style={{ aspectRatio: '1', background: '#f9fafb', borderRadius: 4, marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <img
+                        src={`http://localhost:8001${logo.url}`}
+                        alt={logo.original_filename}
+                        style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                      />
+                    </div>
+                    <div style={{ fontSize: 11, color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                      {logo.original_filename}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )
