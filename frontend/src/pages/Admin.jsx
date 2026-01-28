@@ -364,6 +364,7 @@ function FacilitiesAdmin() {
   const loadFacilities = async () => {
     setLoading(true)
     const data = await getFacilities({ brand_id: selectedBrand })
+    data.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
     setFacilities(data)
     // Load assets to get logo URLs
     const assetData = await getAssets({ brand_id: selectedBrand, asset_type: 'facility_logo' })

@@ -81,6 +81,7 @@ function PresentationWizard() {
         getFacilities()
       ])
       setBrands(brandsData)
+      facilitiesData.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
       setFacilities(facilitiesData)
 
       // If editing, load existing presentation
