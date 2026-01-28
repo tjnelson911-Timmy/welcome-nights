@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Routes, Route, NavLink, useNavigate } from 'react-router-dom'
 import { FileText, Gamepad2, Building2, Image, Plus, Edit2, Trash2, Save, X, Upload, Download, FileBox, MapPin, RefreshCw } from 'lucide-react'
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet'
-import 'leaflet/dist/leaflet.css'
+import Map, { Marker, Popup as MapPopup, NavigationControl } from 'react-map-gl/mapbox'
+import 'mapbox-gl/dist/mapbox-gl.css'
+
+const MAPBOX_TOKEN = 'pk.eyJ1IjoidGpuZWxzb245MTEiLCJhIjoiY21rZ2hvd2h6MDc1bDNkb256c2ZpZzJ5ZSJ9.GjbF9IEBFXgJl-unUW4hoQ'
 import {
   getBrands,
   getContent,
@@ -933,33 +935,10 @@ function TemplatesAdmin() {
   )
 }
 
-// Map Controller - handles auto-fit bounds and fly-to functionality
-function MapController({ markers, selectedFacilityId }) {
-  const map = useMap()
-
-  // Auto-fit bounds when markers change
-  useEffect(() => {
-    if (markers.length > 0) {
-      const bounds = markers.map(m => [m.lat, m.lng])
-      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 10 })
-    }
-  }, [markers, map])
-
-  // Fly to selected facility
-  useEffect(() => {
-    if (selectedFacilityId) {
-      const marker = markers.find(m => m.facility.id === selectedFacilityId)
-      if (marker) {
-        map.flyTo([marker.lat, marker.lng], 12, { duration: 0.5 })
-      }
-    }
-  }, [selectedFacilityId, markers, map])
-
-  return null
-}
 
 // Map Admin - Display facilities on a map
 function MapAdmin() {
+  const mapRef = useRef(null)
   const [brands, setBrands] = useState([])
   const [facilities, setFacilities] = useState([])
   const [selectedBrand, setSelectedBrand] = useState(null)
@@ -969,6 +948,7 @@ function MapAdmin() {
   const [markers, setMarkers] = useState([])
   const [geocodeProgress, setGeocodeProgress] = useState({ current: 0, total: 0 })
   const [selectedFacilityId, setSelectedFacilityId] = useState(null)
+  const [popupInfo, setPopupInfo] = useState(null)
 
   useEffect(() => { loadBrands() }, [])
   useEffect(() => { if (selectedBrand) loadFacilities() }, [selectedBrand])
@@ -1106,8 +1086,15 @@ function MapAdmin() {
     const marker = markers.find(m => m.facility.id === facilityId)
     if (marker) {
       setSelectedFacilityId(facilityId)
-      // Clear selection after animation
-      setTimeout(() => setSelectedFacilityId(null), 1000)
+      setPopupInfo(marker)
+      // Fly to location
+      if (mapRef.current) {
+        mapRef.current.flyTo({
+          center: [marker.lng, marker.lat],
+          zoom: 10,
+          duration: 1500
+        })
+      }
     }
   }
 
@@ -1159,48 +1146,72 @@ function MapAdmin() {
         <div style={{ display: 'flex', gap: 24 }}>
           {/* Map */}
           <div style={{ flex: 2, height: 600, borderRadius: 12, overflow: 'hidden', border: '1px solid #e5e7eb' }}>
-            <MapContainer
-              center={[39.8283, -98.5795]}
-              zoom={4}
-              style={{ height: '100%', width: '100%' }}
+            <Map
+              ref={mapRef}
+              mapboxAccessToken={MAPBOX_TOKEN}
+              initialViewState={{
+                longitude: -98.5795,
+                latitude: 39.8283,
+                zoom: 4
+              }}
+              style={{ width: '100%', height: '100%' }}
+              mapStyle="mapbox://styles/mapbox/light-v11"
+              onClick={() => setPopupInfo(null)}
             >
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
-              <MapController markers={markers} selectedFacilityId={selectedFacilityId} />
-              {markers.map((marker, idx) => (
-                <CircleMarker
+              <NavigationControl position="top-right" />
+              {markers.map((marker) => (
+                <Marker
                   key={marker.facility.id}
-                  center={[marker.lat, marker.lng]}
-                  radius={selectedFacilityId === marker.facility.id ? 12 : 8}
-                  fillColor={selectedFacilityId === marker.facility.id ? '#dc2626' : '#0b7280'}
-                  color="#fff"
-                  weight={2}
-                  opacity={1}
-                  fillOpacity={0.8}
+                  longitude={marker.lng}
+                  latitude={marker.lat}
+                  anchor="center"
+                  onClick={(e) => {
+                    e.originalEvent.stopPropagation()
+                    setPopupInfo(marker)
+                    setSelectedFacilityId(marker.facility.id)
+                  }}
                 >
-                  <Popup>
-                    <div style={{ minWidth: 150 }}>
-                      <div style={{ fontWeight: 600, marginBottom: 4 }}>{marker.facility.name}</div>
-                      {marker.facility.city && (
-                        <div style={{ fontSize: 12, color: '#64748b' }}>
-                          {marker.facility.city}, {marker.facility.state}
-                        </div>
-                      )}
-                      {marker.facility.address && (
-                        <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
-                          {marker.facility.address}
-                        </div>
-                      )}
-                      <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 8 }}>
-                        {marker.lat.toFixed(4)}, {marker.lng.toFixed(4)}
-                      </div>
-                    </div>
-                  </Popup>
-                </CircleMarker>
+                  <div
+                    style={{
+                      width: selectedFacilityId === marker.facility.id ? 20 : 14,
+                      height: selectedFacilityId === marker.facility.id ? 20 : 14,
+                      backgroundColor: selectedFacilityId === marker.facility.id ? '#dc2626' : '#0b7280',
+                      borderRadius: '50%',
+                      border: '2px solid white',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                  />
+                </Marker>
               ))}
-            </MapContainer>
+              {popupInfo && (
+                <MapPopup
+                  longitude={popupInfo.lng}
+                  latitude={popupInfo.lat}
+                  anchor="bottom"
+                  onClose={() => setPopupInfo(null)}
+                  closeOnClick={false}
+                >
+                  <div style={{ minWidth: 150, padding: 4 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>{popupInfo.facility.name}</div>
+                    {popupInfo.facility.city && (
+                      <div style={{ fontSize: 12, color: '#64748b' }}>
+                        {popupInfo.facility.city}, {popupInfo.facility.state}
+                      </div>
+                    )}
+                    {popupInfo.facility.address && (
+                      <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+                        {popupInfo.facility.address}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 8 }}>
+                      {popupInfo.lat.toFixed(4)}, {popupInfo.lng.toFixed(4)}
+                    </div>
+                  </div>
+                </MapPopup>
+              )}
+            </Map>
           </div>
 
           {/* Facility List */}
