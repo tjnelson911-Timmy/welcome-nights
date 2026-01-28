@@ -124,7 +124,7 @@ def export_using_template(
                 replace_slide_logo(slide, facility_logo_path)
 
         # Update text content with brand name and reusable content
-        update_template_slide(slide, slide_idx, brand, facility, slide_data_map, content_map)
+        update_template_slide(db, slide, slide_idx, brand, facility, slide_data_map, content_map)
 
     # Save to bytes
     buffer = io.BytesIO()
@@ -180,6 +180,7 @@ def replace_slide_logo(slide, logo_path: Path):
 
 
 def update_template_slide(
+    db: Session,
     slide,
     slide_idx: int,
     brand: models.Brand,
