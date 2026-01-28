@@ -53,6 +53,12 @@ function PresentMode() {
     try {
       const presentData = await getPresentData(id)
       setData(presentData)
+      // Auto-enter fullscreen when presentation loads
+      setTimeout(() => {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(() => {})
+        }
+      }, 100)
     } catch (err) {
       console.error('Error loading presentation:', err)
       setError('Failed to load presentation: ' + err.message)

@@ -61,10 +61,6 @@ function Admin() {
           <FileBox size={16} style={{ marginRight: 6 }} />
           Templates
         </NavLink>
-        <NavLink to="/admin/content" className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}>
-          <FileText size={16} style={{ marginRight: 6 }} />
-          Content
-        </NavLink>
       </div>
 
       <Routes>

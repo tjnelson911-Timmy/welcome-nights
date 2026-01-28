@@ -1,6 +1,6 @@
 import React from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { Presentation, Settings } from 'lucide-react'
+import { Presentation, Settings, FileText } from 'lucide-react'
 
 function Layout() {
   return (
@@ -12,7 +12,7 @@ function Layout() {
           </div>
           <div className="sidebar-tagline">Culture Night Builder</div>
         </div>
-        <nav>
+        <nav style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <ul className="sidebar-nav">
             <li>
               <NavLink to="/admin" className={({ isActive }) => isActive ? 'active' : ''}>
@@ -24,6 +24,15 @@ function Layout() {
               <NavLink to="/" className={({ isActive }) => isActive ? 'active' : ''} end>
                 <Presentation size={20} />
                 <span>Presentations</span>
+              </NavLink>
+            </li>
+          </ul>
+          <div style={{ flex: 1 }} />
+          <ul className="sidebar-nav" style={{ marginBottom: 16, paddingBottom: 16 }}>
+            <li>
+              <NavLink to="/admin/content" className={({ isActive }) => isActive ? 'active' : ''}>
+                <FileText size={20} />
+                <span>Content</span>
               </NavLink>
             </li>
           </ul>

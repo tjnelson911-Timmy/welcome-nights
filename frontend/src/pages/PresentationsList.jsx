@@ -173,7 +173,6 @@ function PresentationsList() {
             <div
               key={presentation.id}
               className="wn-presentation-card"
-              onClick={() => navigate(`/${presentation.id}/edit`)}
             >
               <div className="wn-presentation-card-header">
                 <div>
@@ -196,13 +195,14 @@ function PresentationsList() {
               </div>
 
               <div style={{ display: 'flex', gap: 8, marginTop: 16, borderTop: '1px solid #e5e7eb', paddingTop: 12 }}>
-                <button
+                <a
                   className="btn btn-sm btn-primary"
-                  onClick={(e) => { e.stopPropagation(); navigate(`/${presentation.id}/present`) }}
-                  title="Present"
+                  href={getExportPptxUrl(presentation.id)}
+                  onClick={(e) => e.stopPropagation()}
+                  title="Download & Present"
                 >
                   <Play size={14} />
-                </button>
+                </a>
                 <button
                   className="btn btn-sm btn-secondary"
                   onClick={(e) => { e.stopPropagation(); navigate(`/${presentation.id}/edit`) }}
@@ -210,14 +210,6 @@ function PresentationsList() {
                 >
                   <Edit2 size={14} />
                 </button>
-                <a
-                  className="btn btn-sm btn-secondary"
-                  href={getExportPptxUrl(presentation.id)}
-                  onClick={(e) => e.stopPropagation()}
-                  title="Download PPTX"
-                >
-                  <Download size={14} />
-                </a>
                 <button
                   className="btn btn-sm btn-danger"
                   onClick={(e) => handleDelete(presentation.id, e)}
