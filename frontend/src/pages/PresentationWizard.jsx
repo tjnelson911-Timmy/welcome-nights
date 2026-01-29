@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Check, Play, Download, FileText } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Check, Play, Download, FileText, Monitor } from 'lucide-react'
 import {
   getBrands,
   getFacilities,
@@ -504,17 +504,24 @@ function PresentationWizard() {
 
               {presentationId && (
                 <div className="wn-export-buttons mt-6">
-                  <button
-                    className="btn btn-secondary"
-                    onClick={() => navigate(`/${presentationId}/present`)}
-                  >
-                    <Play size={16} />
-                    <span>Preview</span>
-                  </button>
-                  <a className="btn btn-secondary" href={getExportPptxUrl(presentationId)}>
+                  <a className="btn btn-primary" href={getExportPptxUrl(presentationId)}>
                     <Download size={16} />
                     <span>Download PPTX</span>
                   </a>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => {
+                      // Download PPTX first
+                      const link = document.createElement('a')
+                      link.href = getExportPptxUrl(presentationId)
+                      link.click()
+                      // Then open browser presentation
+                      setTimeout(() => navigate(`/${presentationId}/present`), 500)
+                    }}
+                  >
+                    <Monitor size={16} />
+                    <span>Present in Browser</span>
+                  </button>
                   <a className="btn btn-secondary" href={getExportPdfUrl(presentationId)}>
                     <FileText size={16} />
                     <span>Download PDF</span>
@@ -535,7 +542,7 @@ function PresentationWizard() {
             <span>{step > 1 ? 'Back' : 'Cancel'}</span>
           </button>
 
-          {step < 4 ? (
+          {step < 4 && (
             <button
               className="btn btn-primary"
               onClick={handleNext}
@@ -543,15 +550,6 @@ function PresentationWizard() {
             >
               <span>{saving ? 'Building...' : 'Next'}</span>
               <ChevronRight size={18} />
-            </button>
-          ) : (
-            <button
-              className="btn btn-primary"
-              onClick={handleCreate}
-              disabled={!canProceed() || saving}
-            >
-              <Check size={18} />
-              <span>{saving ? 'Saving...' : (isEditing ? 'Save Changes' : 'Create Presentation')}</span>
             </button>
           )}
         </div>

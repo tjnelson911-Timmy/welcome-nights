@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Search, Play, Edit2, Trash2, Download, FileText } from 'lucide-react'
+import { Plus, Search, Play, Edit2, Trash2, Download, FileText, Monitor } from 'lucide-react'
 import {
   getPresentations,
   getBrands,
@@ -199,10 +199,25 @@ function PresentationsList() {
                   className="btn btn-sm btn-primary"
                   href={getExportPptxUrl(presentation.id)}
                   onClick={(e) => e.stopPropagation()}
-                  title="Download & Present"
+                  title="Download PPTX"
                 >
-                  <Play size={14} />
+                  <Download size={14} />
                 </a>
+                <button
+                  className="btn btn-sm btn-primary"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    // Download PPTX first
+                    const link = document.createElement('a')
+                    link.href = getExportPptxUrl(presentation.id)
+                    link.click()
+                    // Then open browser presentation
+                    setTimeout(() => navigate(`/${presentation.id}/present`), 500)
+                  }}
+                  title="Present in Browser"
+                >
+                  <Monitor size={14} />
+                </button>
                 <button
                   className="btn btn-sm btn-secondary"
                   onClick={(e) => { e.stopPropagation(); navigate(`/${presentation.id}/edit`) }}
